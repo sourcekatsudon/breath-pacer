@@ -1,0 +1,1085 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>呼吸ペーサー v1.0 (検証用)</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --fg: #0f172a;
+      --muted: #64748b;
+      --accent: #3b82f6;
+      --accent2: #10b981;
+      --danger: #ef4444;
+      --panel: #ffffff;
+      --panel-border: #e5e7eb;
+      --hi-contrast-bg: #000;
+      --hi-contrast-fg: #fff;
+    }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      overflow: hidden;
+    }
+    .app {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      height: 100vh;
+    }
+    header, footer {
+      padding: 8px 12px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--panel-border);
+    }
+    header h1 {
+      font-size: 16px;
+      margin: 0;
+      font-weight: 600;
+    }
+    .main {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 0;
+      /* Let grid manage height and avoid clipping */
+      height: auto;
+      min-height: 0;
+    }
+    .canvas-wrap {
+      position: relative;
+      background: radial-gradient(1200px 1200px at 50% 45%, #eef2ff 0%, #f8fafc 60%, #ffffff 100%);
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .controls {
+      background: var(--panel);
+      border-left: 1px solid var(--panel-border);
+      padding: 12px;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      margin: 6px 0 10px;
+      flex-wrap: wrap;
+    }
+    /* Avoid flex-item intrinsic min-width clipping long labels */
+    .row > * { flex: 1 1 0; min-width: 0; }
+    .buttons .btn {
+      flex: 1 1 auto;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--panel-border);
+      background: #f3f4f6;
+      color: var(--fg);
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .btn { white-space: normal; line-height: 1.3; }
+    .btn.primary { background: linear-gradient(180deg, #3b82f6, #2563eb); border-color: #1e40af; color: #fff; }
+    .btn.warn { background: linear-gradient(180deg, #ef4444, #dc2626); border-color: #991b1b; color: #fff; }
+    .btn.ghost { background: #f3f4f6; }
+    .btn.toggled { outline: 2px solid var(--accent2); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .group { border: 1px solid var(--panel-border); padding: 10px; border-radius: 12px; margin-bottom: 10px; background: #ffffff; }
+    .group h3 { font-size: 13px; margin: 0 0 6px; color: var(--muted); }
+    label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+    input[type="range"] { width: 100%; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; font-size: 12px; }
+    .kv div:nth-child(odd) { color: var(--muted); }
+    .hint { font-size: 12px; color: var(--muted); }
+    .status { font-variant-numeric: tabular-nums; }
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+    .fullscreen .controls { display: none; }
+    .fullscreen .main { grid-template-columns: 1fr; }
+    .fullscreen header, .fullscreen footer { background: transparent; border: 0; }
+    .hi-contrast { --bg: var(--hi-contrast-bg); --fg: var(--hi-contrast-fg); --panel: #000; --panel-border:#333; }
+    .badge { padding: 2px 6px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 999px; font-size: 12px; color: var(--fg); }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <header>
+      <h1>呼吸ペーサー v1.0（デスクトップ検証用） <span id="sessionState" class="badge">IDLE</span></h1>
+    </header>
+    <div class="main">
+      <div class="canvas-wrap">
+        <canvas id="canvas"></canvas>
+      </div>
+      <div class="controls">
+        <div class="row buttons">
+          <button id="btnStartStop" class="btn primary">開始</button>
+          <button id="btnMute" class="btn ghost">ミュート</button>
+          <button id="btnFullscreen" class="btn ghost">画面占有</button>
+        </div>
+        <div class="group" id="modes">
+          <h3>モード選択 (1–5)</h3>
+          <div class="row">
+            <button class="btn ghost" data-mode="M0">M0 日常安定化 4-0-6</button>
+            <button class="btn ghost" data-mode="M1">M1 コヒーレント 5-0-5</button>
+          </div>
+          <div class="row">
+            <button class="btn ghost" data-mode="M2">M2 ディープ 4-1-7</button>
+            <button class="btn ghost" data-mode="M3">M3 ランプ 3-0-4→6</button>
+            <button class="btn ghost" data-mode="M4">M4 微小ゆらぎ</button>
+          </div>
+        </div>
+        <div class="row">
+          <button id="btnCharOwl" class="btn ghost" data-char="owl">フクロウ</button>
+          <button id="btnCharPuffer" class="btn ghost" data-char="puffer">フグ</button>
+        </div>
+        <div class="group">
+          <h3>キャラクター</h3>
+          <div class="row">
+            <button id="btnCharHam" class="btn ghost" data-char="hamster">ハムスター</button>
+            <button id="btnCharGuinea" class="btn ghost" data-char="guinea">モルモット</button>
+            <button id="btnCharDog" class="btn ghost" data-char="dog">犬</button>
+            <button id="btnCharCat" class="btn ghost" data-char="cat">猫</button>
+          </div>
+        </div>
+        <div class="group">
+          <h3>膨らみモード</h3>
+          <div class="row">
+            <button id="btnExpandBody" class="btn ghost" data-expand="body">膨らみ: 全身</button>
+            <button id="btnExpandCheeks" class="btn ghost" data-expand="cheeks">膨らみ: ほっぺ</button>
+          </div>
+        </div>
+        <div class="group">
+          <h3>スライダ</h3>
+          <div>
+            <label>BPM 5–9 <span id="lblBpm" class="status"></span></label>
+            <input id="slBpm" type="range" min="5" max="9" step="0.1" />
+          </div>
+          <div>
+            <label>可動振幅（画面比%）2.5–5 <span id="lblAmp" class="status"></span></label>
+            <input id="slAmp" type="range" min="2.5" max="5" step="0.1" />
+          </div>
+          <div>
+            <label>ハムスター ふくらみ倍率 ×0.5–×2.0 <span id="lblHamAmp" class="status"></span></label>
+            <input id="slHamAmp" type="range" min="0.5" max="10" step="0.1" />
+          </div>
+          <div>
+            <label>音量（dBFS） -48〜-24 <span id="lblVol" class="status"></span></label>
+            <input id="slVol" type="range" min="-48" max="-24" step="1" />
+          </div>
+        </div>
+        <div class="group">
+          <h3>トグル</h3>
+          <div class="row">
+            <button id="tgRamp" class="btn ghost">ランプイン ON</button>
+            <button id="tgJitter" class="btn ghost">微小ゆらぎ ON</button>
+          </div>
+          <div class="row">
+            <button id="tgAuto" class="btn ghost">自動セッション ON</button>
+            <button id="tgTheme" class="btn ghost">高コントラスト OFF</button>
+          </div>
+          <div class="row">
+            <button id="tgVisual" class="btn ghost">表示: オーブ</button>
+            <button id="tgMotion" class="btn ghost">動き: 上下</button>
+          </div>
+        </div>
+        <div class="group">
+          <h3>スケジューラ</h3>
+          <div class="kv">
+            <div>次回まで:</div><div id="lblNext">--:--</div>
+            <div>残り時間:</div><div id="lblRemain">--:--</div>
+            <div>間隔(分):</div><div><input id="inInterval" type="number" min="25" max="40" step="1" style="width:80px"> </div>
+            <div>長さ(秒):</div><div><input id="inDuration" type="number" min="60" max="120" step="5" style="width:80px"> </div>
+          </div>
+          <div class="row">
+            <button id="btnSkip" class="btn">スキップ</button>
+          </div>
+        </div>
+        <div class="group">
+          <h3>ログ/設定</h3>
+          <div class="row">
+            <button id="btnExportCsv" class="btn">CSVエクスポート</button>
+            <button id="btnReset" class="btn warn">設定初期化</button>
+          </div>
+          <div class="hint">Space:開始/停止, 1–5:モード, ↑↓:BPM, M:ミュート, F:全画面</div>
+        </div>
+      </div>
+    </div>
+    <footer class="footer">
+      <div>
+        <span>状態:</span> <span id="lblStatus" class="status">準備中</span>
+      </div>
+      <div>
+        <span id="lblMode" class="badge">M0</span>
+        <span id="lblProfile" class="badge">吸4/保0/吐6</span>
+        <span id="lblEffectiveBpm" class="badge">6.0 BPM</span>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+  // --- Utilities ---
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const mix = (a, b, t) => a + (b - a) * t;
+  const toLinear = (db) => Math.pow(10, db / 20);
+  const fmt1 = (x) => x.toFixed(1);
+  const nowSec = () => performance.now() / 1000;
+
+  // Minimum-jerk quintic ease-in-out from 0..1
+  function minimumJerk(s) { // s in [0,1]
+    return 10 * s**3 - 15 * s**4 + 6 * s**5;
+  }
+
+  // Low frequency noise via sum of two sines in 0.02–0.05 Hz
+  function makeLFNoise() {
+    const f1 = 0.02 + Math.random() * 0.03; // 0.02..0.05
+    const f2 = 0.02 + Math.random() * 0.03;
+    const p1 = Math.random() * Math.PI * 2;
+    const p2 = Math.random() * Math.PI * 2;
+    return (t) => ((Math.sin(2*Math.PI*f1*t + p1) + Math.sin(2*Math.PI*f2*t + p2)) * 0.5);
+  }
+
+  // --- Default Settings ---
+  const DEFAULT_SETTINGS = {
+    mode: 'M0',
+    bpm: 6.0,
+    inhale: 4.0,
+    hold: 0.0,
+    exhale: 6.0,
+    ramp: { enabled: true, durationSec: 75, startBpm: 9.0, targetBpm: 6.0 },
+    microJitter: { enabled: true, periodHz: 0.03, depthPct: 0.02 },
+    amplitudePct: 0.03,
+    audio: { enabled: true, masterDb: -36, toneHz: 300, lpfHz: 1000 },
+    scheduler: { auto: false, intervalMin: 30, sessionSec: 90 },
+    theme: 'dark',
+    visual: { kind: 'orb', motion: 'y', hamsterScale: 1.0, expand: 'body', character: 'hamster' }, // kind: 'orb' | 'bar', motion: 'y' | 'radius'
+  };
+
+  // Persistence
+  function loadSettings() {
+    try {
+      const s = localStorage.getItem('breath_settings');
+      if (!s) return { ...DEFAULT_SETTINGS };
+      const obj = JSON.parse(s);
+      return { ...DEFAULT_SETTINGS, ...obj, ramp: { ...DEFAULT_SETTINGS.ramp, ...(obj.ramp||{}) }, microJitter: { ...DEFAULT_SETTINGS.microJitter, ...(obj.microJitter||{}) }, audio: { ...DEFAULT_SETTINGS.audio, ...(obj.audio||{}) }, scheduler: { ...DEFAULT_SETTINGS.scheduler, ...(obj.scheduler||{}) }, visual: { ...DEFAULT_SETTINGS.visual, ...(obj.visual||{}) } };
+    } catch (e) { console.warn(e); return { ...DEFAULT_SETTINGS }; }
+  }
+  function saveSettings() {
+    localStorage.setItem('breath_settings', JSON.stringify(settings));
+  }
+
+  // Logging
+  const logs = [];
+  function logEvent(type, data={}) {
+    const entry = { ts: new Date().toISOString(), type, ...data };
+    logs.push(entry);
+    // keep lightweight
+    if (logs.length > 2000) logs.shift();
+  }
+  function exportCsv() {
+    const header = ['ts','type','mode','bpm','inhale','hold','exhale','effectiveBpm','note'];
+    const rows = logs.map(l => [l.ts, l.type, l.mode||'', l.bpm||'', l.inhale||'', l.hold||'', l.exhale||'', l.effectiveBpm||'', l.note||'']);
+    const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `breath_logs_${Date.now()}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // --- Audio Engine ---
+  class AudioEngine {
+    constructor() {
+      this.ctx = null;
+      this.master = null;
+      this.envGain = null;
+      this.noiseFilter = null;
+      this.noiseGain = null;
+      this.toneOsc = null;
+      this.toneGain = null;
+      this.noiseSrc = null; // recreated when (re)start
+      this.started = false;
+    }
+    async ensureStarted() {
+      if (this.ctx) return;
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+      this.ctx = ctx;
+      // graph
+      this.master = ctx.createGain();
+      this.master.gain.value = toLinear(settings.audio.masterDb || -36);
+      this.master.connect(ctx.destination);
+
+      this.envGain = ctx.createGain();
+      this.envGain.gain.value = 0.0; // start silent until session
+      this.envGain.connect(this.master);
+
+      // noise
+      this.noiseFilter = ctx.createBiquadFilter();
+      this.noiseFilter.type = 'lowpass';
+      this.noiseFilter.frequency.value = settings.audio.lpfHz || 1000;
+
+      this.noiseGain = ctx.createGain();
+      this.noiseGain.gain.value = 0.8; // base noise level
+      this.noiseFilter.connect(this.noiseGain);
+      this.noiseGain.connect(this.envGain);
+
+      // tone
+      this.toneGain = ctx.createGain();
+      this.toneGain.gain.value = toLinear(-12); // -12 dB relative note
+      this.toneGain.connect(this.envGain);
+
+      this.toneOsc = ctx.createOscillator();
+      this.toneOsc.type = 'triangle';
+      this.toneOsc.frequency.value = settings.audio.toneHz || 300;
+      this.toneOsc.connect(this.toneGain);
+      this.toneOsc.start();
+
+      this.started = true;
+    }
+    _makeNoiseBuffer(seconds = 2) {
+      const ctx = this.ctx;
+      const rate = ctx.sampleRate;
+      const length = Math.floor(seconds * rate);
+      const buffer = ctx.createBuffer(1, length, rate);
+      const data = buffer.getChannelData(0);
+      for (let i=0;i<length;i++) data[i] = Math.random() * 2 - 1;
+      return buffer;
+    }
+    _ensureNoiseSource() {
+      if (!this.ctx) return;
+      if (this.noiseSrc) return;
+      const ctx = this.ctx;
+      const src = ctx.createBufferSource();
+      src.buffer = this._makeNoiseBuffer(2);
+      src.loop = true;
+      src.connect(this.noiseFilter);
+      src.start();
+      this.noiseSrc = src;
+    }
+    setMasterDb(db) {
+      if (!this.master) return;
+      const v = toLinear(db);
+      const t = this.ctx.currentTime;
+      this.master.gain.cancelScheduledValues(t);
+      this.master.gain.setTargetAtTime(v, t, 0.02);
+    }
+    setMute(muted) {
+      if (!this.master) return;
+      const t = this.ctx.currentTime;
+      this.master.gain.cancelScheduledValues(t);
+      const target = muted ? 0.0 : toLinear(settings.audio.masterDb);
+      this.master.gain.setTargetAtTime(target, t, 0.02);
+    }
+    setFilterHz(hz) {
+      if (!this.noiseFilter) return;
+      const t = this.ctx.currentTime;
+      this.noiseFilter.frequency.cancelScheduledValues(t);
+      this.noiseFilter.frequency.setTargetAtTime(hz, t, 0.05);
+    }
+    setToneHz(hz) {
+      if (!this.toneOsc) return;
+      const t = this.ctx.currentTime;
+      this.toneOsc.frequency.cancelScheduledValues(t);
+      this.toneOsc.frequency.setTargetAtTime(hz, t, 0.05);
+    }
+    // env in [0,1]
+    applyEnvelope(env) {
+      if (!this.envGain) return;
+      const t = this.ctx.currentTime;
+      const val = env; // linear AM
+      this.envGain.gain.setTargetAtTime(val, t, 0.02);
+      // inhale brightening: raise LPF cutoff slightly with env (800..1200)
+      const hz = lerp(800, 1200, env);
+      this.setFilterHz(hz);
+    }
+    startSession() {
+      this._ensureNoiseSource();
+      const t = this.ctx.currentTime;
+      this.envGain.gain.cancelScheduledValues(t);
+      this.envGain.gain.setTargetAtTime(0.0, t, 0.02);
+      this.envGain.gain.setTargetAtTime(0.001, t + 0.01, 0.02); // fade in minimal floor to avoid absolute zero pop
+    }
+    stopSession() {
+      const t = this.ctx.currentTime;
+      this.envGain.gain.cancelScheduledValues(t);
+      this.envGain.gain.setTargetAtTime(0.0, t, 0.03);
+    }
+  }
+
+  // --- LFO Engine ---
+  class LFOEngine {
+    constructor(getTime) {
+      this.getTime = getTime;
+      this.t0 = 0;
+      this.j1 = makeLFNoise();
+      this.j2 = makeLFNoise();
+      this._rampStartBpm = 9.0;
+      this._rampTargetBpm = 6.0;
+      this._rampDuration = 75;
+      this._rampStartTime = 0;
+      this.effectiveBpm = 6.0;
+    }
+    reset(t) {
+      this.t0 = t;
+      this._rampStartTime = t;
+      this._rampStartBpm = settings.ramp.startBpm;
+      this._rampTargetBpm = settings.ramp.targetBpm;
+      this._rampDuration = settings.ramp.durationSec;
+    }
+    // compute envelope 0..1
+    eval(t) {
+      // base bpm with ramp if enabled during session window
+      let bpmBase = settings.bpm;
+      if (settings.ramp.enabled) {
+        const dt = Math.max(0, t - this._rampStartTime);
+        const u = clamp(this._rampDuration > 0 ? dt / this._rampDuration : 1, 0, 1);
+        const k = minimumJerk(u); // smooth ramp
+        bpmBase = lerp(this._rampStartBpm, this._rampTargetBpm, k);
+      }
+      // micro jitter ±depth
+      let bpm = bpmBase;
+      const depth = settings.microJitter.enabled ? (settings.microJitter.depthPct || 0.02) : 0.0;
+      let ampFactor = 1.0;
+      if (depth > 0) {
+        const n1 = clamp(0.5 * (this.j1(t) + this.j2(t)), -1, 1);
+        const n2 = clamp(0.5 * (this.j1(t + 7.77) + this.j2(t + 3.14)), -1, 1);
+        bpm *= (1 + n1 * depth);
+        ampFactor = (1 + n2 * depth);
+      }
+      this.effectiveBpm = bpm;
+      const T = 60 / bpm;
+      const inh = settings.inhale, hold = settings.hold, exh = settings.exhale;
+      const total = inh + hold + exh;
+      const cyc = T; // keep T as full cycle based on bpm; profile shapes within phase
+      const phase = ((t - this.t0) / cyc) % 1;
+
+      // map phase to profile fraction s and direction
+      const split1 = inh / total;
+      const split2 = (inh + hold) / total;
+      let envProfile;
+      if (phase < split1) {
+        const s = phase / split1;
+        envProfile = minimumJerk(s); // inhale up 0->1
+      } else if (phase < split2) {
+        envProfile = 1.0; // hold
+      } else {
+        const s = (phase - split2) / (1 - split2);
+        envProfile = 1.0 - minimumJerk(s); // exhale down 1->0
+      }
+      // blend with sine for roundness
+      const sine = 0.5 + 0.5 * Math.sin(2 * Math.PI * phase);
+      const env = mix(sine, envProfile, 0.3); // 70% sine, 30% profile
+      return { env, phase, bpm, ampFactor };
+    }
+  }
+
+  // --- Motion Engine ---
+  class MotionEngine {
+    constructor(canvas) {
+      this.canvas = canvas;
+      this.ctx = canvas.getContext('2d');
+      this.resize();
+      window.addEventListener('resize', () => this.resize());
+      this._blink = null; // {next, until, on}
+    }
+    resize() {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      this.canvas.width = Math.floor(this.canvas.clientWidth * dpr);
+      this.canvas.height = Math.floor(this.canvas.clientHeight * dpr);
+      this.dpr = dpr;
+    }
+    draw(env) {
+      const g = this.ctx;
+      const W = this.canvas.width, H = this.canvas.height;
+      g.clearRect(0, 0, W, H);
+
+      const amp = settings.amplitudePct; // 0.025..0.05 ratio of height
+      const ampPx = H * amp;
+      const centerY = H * 0.5;
+      const centerX = W * 0.5;
+      const yOffset = (env - 0.5) * 2 * ampPx; // -amp..+amp
+
+      const visualKind = settings.visual.kind; // 'orb' or 'bar'
+      const motion = settings.visual.motion; // 'y' or 'radius'
+
+      // subtle luminance with env
+      const lum = 0.08 + env * 0.10; // keep within safe flicker
+
+      if (visualKind === 'orb') {
+        // Cute front-facing critters that breathe and blink
+        const y = motion === 'y' ? centerY - yOffset : centerY;
+        const baseSize = Math.min(W, H) * 0.22; // overall scale
+        const hs = (settings.visual && settings.visual.hamsterScale) ? settings.visual.hamsterScale : 1.0;
+        const eCentered = (env - 0.5) * 2; // -1..+1
+        const expandMode = (settings.visual && settings.visual.expand) ? settings.visual.expand : 'body';
+        const baseAmp = (motion === 'radius' ? 0.25 : 0.18) * hs; // amplitude multiplier
+        const bodyAmp = expandMode === 'body' ? baseAmp * 0.5 : baseAmp * 0.08; // smaller when cheeks-only
+        const breatheScale = 1 + eCentered * bodyAmp;
+        const u = baseSize * breatheScale; // pixel per unit (affects body)
+
+        // Blink scheduler
+        const tn = nowSec();
+        if (!this._blink) this._blink = { next: tn + 2 + Math.random()*4, until: 0, on: false };
+        if (!this._blink.on && tn >= this._blink.next) {
+          this._blink.on = true; this._blink.until = tn + (0.08 + Math.random()*0.07);
+        }
+        if (this._blink.on && tn >= this._blink.until) {
+          this._blink.on = false; this._blink.next = tn + (2 + Math.random()*4);
+        }
+        const blinking = !!this._blink.on;
+
+        // Character palette
+        const character = (settings.visual && settings.visual.character) ? settings.visual.character : 'hamster';
+        let fur = '#d8b48b', furShadow = '#c9a279', belly = '#f4efe6', earInner = '#f0c7b5', eye = '#222', stroke = 'rgba(0,0,0,0.25)';
+        if (character === 'guinea') { fur = '#c08f5a'; furShadow = '#af7f4f'; belly = '#f7f2ea'; earInner = '#f3d1c4'; }
+        if (character === 'dog')    { fur = '#caa27a'; furShadow = '#b38d66'; belly = '#f2ebe2'; earInner = '#e3c0a8'; }
+        if (character === 'cat')    { fur = '#d7c6a7'; furShadow = '#c6b28f'; belly = '#f4efe6'; earInner = '#f8d0d0'; }
+        if (character === 'owl')    { fur = '#bda77a'; furShadow = '#a89468'; belly = '#efe6d1'; earInner = '#e9d3b0'; }
+        if (character === 'puffer') { fur = '#f0d96a'; furShadow = '#dec455'; belly = '#fff8d6'; earInner = '#f7e9a8'; }
+        const cheek = 'rgba(255,128,128,0.20)';
+
+        // Soft ground shadow
+        const shadowR = u * 1.0;
+        const shadowY = y + u * 0.95;
+        const gradS = g.createRadialGradient(centerX, shadowY, shadowR*0.05, centerX, shadowY, shadowR);
+        gradS.addColorStop(0, `rgba(0,0,0,${0.15 + lum*0.10})`);
+        gradS.addColorStop(1, 'rgba(0,0,0,0)');
+        g.beginPath();
+        g.fillStyle = gradS;
+        g.ellipse(centerX, shadowY, shadowR, shadowR*0.22, 0, 0, Math.PI*2);
+        g.fill();
+
+        g.save();
+        g.translate(centerX, y);
+
+        // Body shape (varies by character)
+        g.save();
+        let bodyRx = u*0.95, bodyRy = u*1.05;
+        if (character === 'guinea') { bodyRx = u*1.30; bodyRy = u*0.95; }
+        if (character === 'dog')    { bodyRx = u*1.00; bodyRy = u*1.12; }
+        if (character === 'cat')    { bodyRx = u*0.90; bodyRy = u*1.20; }
+        if (character === 'owl')    { bodyRx = u*0.98; bodyRy = u*1.10; }
+        if (character === 'puffer') { bodyRx = u*1.10; bodyRy = u*1.10; }
+        g.beginPath();
+        g.fillStyle = fur;
+        g.ellipse(0, 0, bodyRx, bodyRy, 0, 0, Math.PI*2);
+        g.fill();
+        // soft edge shading
+        const gradBody = g.createRadialGradient(-u*0.2, -u*0.5, u*0.2, 0, 0, u*1.1);
+        gradBody.addColorStop(0, 'rgba(255,255,255,0.10)');
+        gradBody.addColorStop(1, 'rgba(0,0,0,0.10)');
+        g.fillStyle = gradBody;
+        g.beginPath();
+        g.ellipse(0, 0, bodyRx, bodyRy, 0, 0, Math.PI*2);
+        g.fill();
+        g.restore();
+
+        // Belly / face patches per character
+        g.beginPath();
+        g.fillStyle = belly;
+        if (character === 'guinea') {
+          // long belly and side patch
+          g.ellipse(0, u*0.25, u*0.75, u*0.65, 0, 0, Math.PI*2);
+          g.fill();
+          g.fillStyle = '#ffffff0f';
+          g.beginPath(); g.ellipse(-u*0.3, -u*0.1, u*0.6, u*0.5, 0, 0, Math.PI*2); g.fill();
+        } else if (character === 'dog') {
+          // round belly and muzzle mask
+          g.ellipse(0, u*0.35, u*0.55, u*0.6, 0, 0, Math.PI*2); g.fill();
+          g.beginPath(); g.ellipse(0, 0, u*0.55, u*0.40, 0, 0, Math.PI*2); g.fill();
+        } else if (character === 'cat') {
+          g.ellipse(0, u*0.25, u*0.50, u*0.65, 0, 0, Math.PI*2); g.fill();
+        } else if (character === 'owl') {
+          // facial disc
+          g.ellipse(0, -u*0.2, u*0.75, u*0.60, 0, 0, Math.PI*2); g.fill();
+        } else if (character === 'puffer') {
+          // light belly area
+          g.ellipse(0, u*0.20, u*0.70, u*0.65, 0, 0, Math.PI*2); g.fill();
+        } else {
+          g.ellipse(0, u*0.2, u*0.6, u*0.7, 0, 0, Math.PI*2); g.fill();
+        }
+
+        // Ears by character
+        g.fillStyle = fur;
+        const earY = -u*0.9;
+        if (character === 'hamster' || character === 'guinea') {
+          const earR = character==='guinea' ? u*0.16 : u*0.22;
+          const earX = character==='guinea' ? u*0.5 : u*0.55;
+          g.beginPath(); g.arc(-earX, earY, earR, 0, Math.PI*2); g.fill();
+          g.beginPath(); g.arc( earX, earY, earR, 0, Math.PI*2); g.fill();
+          g.fillStyle = earInner;
+          g.beginPath(); g.arc(-earX*1.02, earY*0.98, earR*0.55, 0, Math.PI*2); g.fill();
+          g.beginPath(); g.arc( earX*1.02, earY*0.98, earR*0.55, 0, Math.PI*2); g.fill();
+        } else if (character === 'dog') {
+          // floppy ears
+          g.beginPath(); g.ellipse(-u*0.65, -u*0.65, u*0.22, u*0.35, -0.3, 0, Math.PI*2); g.fill();
+          g.beginPath(); g.ellipse( u*0.65, -u*0.65, u*0.22, u*0.35,  0.3, 0, Math.PI*2); g.fill();
+        } else if (character === 'cat') {
+          // triangle ears
+          const drawTri = (sx) => { g.beginPath(); g.moveTo(sx*u*0.55, -u*0.95); g.lineTo(sx*u*0.82, -u*0.7); g.lineTo(sx*u*0.45, -u*0.72); g.closePath(); g.fill(); };
+          drawTri(-1); drawTri(1);
+          g.fillStyle = earInner;
+          const drawTriIn = (sx) => { g.beginPath(); g.moveTo(sx*u*0.55, -u*0.9); g.lineTo(sx*u*0.75, -u*0.72); g.lineTo(sx*u*0.5, -u*0.73); g.closePath(); g.fill(); };
+          drawTriIn(-1); drawTriIn(1);
+        } else if (character === 'owl') {
+          // small ear tufts
+          const drawTuft = (sx) => { g.beginPath(); g.moveTo(sx*u*0.5, -u*0.95); g.lineTo(sx*u*0.7, -u*0.82); g.lineTo(sx*u*0.45, -u*0.85); g.closePath(); g.fill(); };
+          drawTuft(-1); drawTuft(1);
+        }
+
+        // Eyes (blink -> thin lines)
+        const eyeX = u*0.40;
+        const eyeY = -u*0.25;
+        let eyeR = u*0.10; if (character==='owl') eyeR = u*0.13; if (character==='puffer') eyeR = u*0.09;
+        g.fillStyle = eye;
+        if (!blinking) {
+          g.beginPath(); g.arc(-eyeX, eyeY, eyeR, 0, Math.PI*2); g.fill();
+          g.beginPath(); g.arc( eyeX, eyeY, eyeR, 0, Math.PI*2); g.fill();
+          // tiny highlight
+          g.fillStyle = 'rgba(255,255,255,0.7)';
+          if (character === 'cat') {
+            // cat pupil (vertical slit)
+            g.fillStyle = '#111';
+            g.beginPath(); g.ellipse(-eyeX, eyeY, eyeR*0.25, eyeR*0.95, 0, 0, Math.PI*2); g.fill();
+            g.beginPath(); g.ellipse( eyeX, eyeY, eyeR*0.25, eyeR*0.95, 0, 0, Math.PI*2); g.fill();
+          } else {
+            g.beginPath(); g.arc(-eyeX - eyeR*0.25, eyeY - eyeR*0.25, eyeR*0.25, 0, Math.PI*2); g.fill();
+            g.beginPath(); g.arc( eyeX - eyeR*0.25, eyeY - eyeR*0.25, eyeR*0.25, 0, Math.PI*2); g.fill();
+          }
+        } else {
+          g.strokeStyle = eye;
+          g.lineWidth = Math.max(2, u*0.04);
+          g.lineCap = 'round';
+          g.beginPath(); g.moveTo(-eyeX - eyeR*0.7, eyeY); g.lineTo(-eyeX + eyeR*0.7, eyeY); g.stroke();
+          g.beginPath(); g.moveTo( eyeX - eyeR*0.7, eyeY); g.lineTo( eyeX + eyeR*0.7, eyeY); g.stroke();
+        }
+
+        // Nose + mouth (vary slightly)
+        const noseY = -u*0.02;
+        g.strokeStyle = stroke; g.lineWidth = Math.max(1, u*0.03);
+        if (character === 'dog' || character === 'cat') {
+          g.fillStyle = '#333';
+          // triangle-ish nose
+          g.beginPath(); g.moveTo(0, noseY - u*0.04); g.lineTo(-u*0.06, noseY + u*0.04); g.lineTo(u*0.06, noseY + u*0.04); g.closePath(); g.fill();
+          // muzzle
+          g.fillStyle = belly;
+          g.beginPath(); g.ellipse(0, noseY + u*0.07, u*0.22, u*0.16, 0, 0, Math.PI*2); g.fill();
+        } else {
+          g.fillStyle = '#e38b7b';
+          g.beginPath(); g.ellipse(0, noseY, u*0.08, u*0.06, 0, 0, Math.PI*2); g.fill();
+        }
+        g.beginPath(); g.moveTo(0, noseY + u*0.05); g.lineTo(0, noseY + u*0.12); g.stroke();
+        g.beginPath(); g.arc(-u*0.06, noseY + u*0.14, u*0.06, Math.PI*1.8, Math.PI*2.2); g.stroke();
+        g.beginPath(); g.arc( u*0.06, noseY + u*0.14, u*0.06, Math.PI*0.8, Math.PI*1.2); g.stroke();
+
+        // Cheeks (expand only if mode is cheeks)
+        const cheekScale = 1 + eCentered * (expandMode==='cheeks' ? 0.35*hs : 0.10*hs);
+        g.fillStyle = cheek;
+        g.beginPath(); g.ellipse(-u*0.52, noseY + u*0.10, u*0.18*cheekScale, u*0.12*cheekScale, 0, 0, Math.PI*2); g.fill();
+        g.beginPath(); g.ellipse( u*0.52, noseY + u*0.10, u*0.18*cheekScale, u*0.12*cheekScale, 0, 0, Math.PI*2); g.fill();
+
+        // Paws / extras
+        if (character === 'puffer') {
+          // little side fins
+          g.fillStyle = furShadow;
+          const finY = u*0.2;
+          const finW = u*0.25, finH = u*0.15;
+          g.beginPath(); g.moveTo(-u*0.95, finY); g.lineTo(-u*0.95-finW, finY-finH); g.lineTo(-u*0.95-finW, finY+finH); g.closePath(); g.fill();
+          g.beginPath(); g.moveTo( u*0.95, finY); g.lineTo( u*0.95+finW, finY-finH); g.lineTo( u*0.95+finW, finY+finH); g.closePath(); g.fill();
+          // spikes
+          g.strokeStyle = 'rgba(0,0,0,0.15)'; g.lineWidth = Math.max(1, u*0.02);
+          for (let i=0;i<18;i++) {
+            const a = (i/18)*Math.PI*2;
+            const sx = Math.cos(a), sy = Math.sin(a);
+            g.beginPath(); g.moveTo(u*0.8*sx, u*0.8*sy); g.lineTo(u*1.1*sx, u*1.1*sy); g.stroke();
+          }
+        } else {
+          g.fillStyle = furShadow;
+          g.beginPath(); g.ellipse(-u*0.35, u*0.85, u*0.20, u*0.10, 0, 0, Math.PI*2); g.fill();
+          g.beginPath(); g.ellipse( u*0.35, u*0.85, u*0.20, u*0.10, 0, 0, Math.PI*2); g.fill();
+          // tails
+          if (character === 'dog' || character === 'cat') {
+            g.strokeStyle = furShadow; g.lineWidth = Math.max(2, u*0.04);
+            g.beginPath();
+            if (character === 'dog') {
+              g.moveTo(u*0.95, u*0.3); g.quadraticCurveTo(u*1.25, u*0.1, u*1.0, -u*0.1);
+            } else {
+              g.moveTo(u*0.90, u*0.45); g.quadraticCurveTo(u*1.30, 0, u*0.80, -u*0.30);
+            }
+            g.stroke();
+          }
+        }
+
+        // Whiskers
+        g.strokeStyle = 'rgba(0,0,0,0.2)'; g.lineWidth = Math.max(1, u*0.02);
+        const wy = noseY + u*0.05, wx = u*0.16;
+        for (let i=0;i<3;i++) {
+          const dy = (-1 + i) * u*0.06;
+          g.beginPath(); g.moveTo(-wx, wy+dy); g.lineTo(-wx - u*(0.35 + i*0.05), wy+dy - u*(0.02*i)); g.stroke();
+          g.beginPath(); g.moveTo( wx, wy+dy); g.lineTo( wx + u*(0.35 + i*0.05), wy+dy - u*(0.02*i)); g.stroke();
+        }
+
+        g.restore();
+
+      } else {
+        // bar
+        const barH = Math.max(6, Math.floor(H * 0.01));
+        const y = centerY - yOffset;
+        g.fillStyle = `rgba(34,197,94,${0.3 + lum * 0.4})`;
+        g.fillRect(W*0.1, y - barH/2, W*0.8, barH);
+        g.strokeStyle = 'rgba(52,211,153,0.6)';
+        g.lineWidth = 2;
+        g.strokeRect(W*0.1, y - barH/2, W*0.8, barH);
+      }
+    }
+  }
+
+  // --- Scheduler ---
+  const SCHED = { IDLE:'IDLE', PENDING:'PENDING', RUNNING:'RUNNING', COOLDOWN:'COOLDOWN' };
+  class Scheduler {
+    constructor() {
+      this.state = SCHED.IDLE;
+      this.nextStart = 0;
+      this.sessionEnd = 0;
+      this.cooldownEnd = 0;
+    }
+    planNext(from=Date.now()/1000) {
+      const interval = (settings.scheduler.intervalMin||30) * 60;
+      this.nextStart = from + interval;
+      this.state = SCHED.PENDING;
+      updateStatus();
+    }
+    startNow() {
+      const t = audio.ctx ? audio.ctx.currentTime : 0;
+      const len = settings.scheduler.sessionSec || 90;
+      this.sessionEnd = t + len;
+      this.state = SCHED.RUNNING;
+      lfo.reset(t);
+      audio.startSession();
+      logEvent('session_start', { mode: settings.mode, bpm: settings.bpm, inhale: settings.inhale, hold: settings.hold, exhale: settings.exhale });
+      updateStatus();
+    }
+    stopNow() {
+      if (this.state === SCHED.RUNNING) {
+        audio.stopSession();
+        const t = audio.ctx ? audio.ctx.currentTime : 0;
+        this.cooldownEnd = t + 2.0;
+        this.state = SCHED.COOLDOWN;
+        logEvent('session_end', { mode: settings.mode });
+      } else {
+        this.state = SCHED.IDLE;
+      }
+      updateStatus();
+    }
+    tick() {
+      const ctxTime = audio.ctx ? audio.ctx.currentTime : 0;
+      if (this.state === SCHED.RUNNING) {
+        if (ctxTime >= this.sessionEnd) {
+          this.stopNow();
+        }
+      } else if (this.state === SCHED.COOLDOWN) {
+        if (ctxTime >= this.cooldownEnd) {
+          if (settings.scheduler.auto) this.planNext(ctxTime);
+          else this.state = SCHED.IDLE;
+          updateStatus();
+        }
+      } else if (this.state === SCHED.PENDING) {
+        if (settings.scheduler.auto) {
+          const nowWall = Date.now()/1000;
+          if (nowWall >= this.nextStart) {
+            // start a new AudioContext time-aligned session
+            this.startNow();
+          }
+        }
+      }
+    }
+  }
+
+  // --- App State ---
+  let settings = loadSettings();
+  const audio = new AudioEngine();
+  const lfo = new LFOEngine(() => audio.ctx ? audio.ctx.currentTime : 0);
+  const scheduler = new Scheduler();
+
+  // --- UI Wiring ---
+  const el = (id) => document.getElementById(id);
+  const cvs = el('canvas');
+  const motion = new MotionEngine(cvs);
+
+  const lblBpm = el('lblBpm');
+  const lblAmp = el('lblAmp');
+  const lblHamAmp = el('lblHamAmp');
+  const lblVol = el('lblVol');
+  const lblNext = el('lblNext');
+  const lblRemain = el('lblRemain');
+  const lblStatus = el('lblStatus');
+  const lblMode = el('lblMode');
+  const lblProfile = el('lblProfile');
+  const lblEff = el('lblEffectiveBpm');
+  const sessionStateTag = el('sessionState');
+
+  function hhmmss(sec) {
+    if (!isFinite(sec) || sec < 0) return '--:--';
+    const m = Math.floor(sec/60);
+    const s = Math.floor(sec%60);
+    return `${m}:${s.toString().padStart(2,'0')}`;
+  }
+
+  function applyMode(mode) {
+    settings.mode = mode;
+    if (mode === 'M0') { settings.inhale=4; settings.hold=0; settings.exhale=6; settings.bpm=6; }
+    if (mode === 'M1') { settings.inhale=5; settings.hold=0; settings.exhale=5; settings.bpm=6; }
+    if (mode === 'M2') { settings.inhale=4; settings.hold=1; settings.exhale=7; settings.bpm=5; }
+    if (mode === 'M3') { settings.inhale=3; settings.hold=0; settings.exhale=6; settings.bpm=9; /* exhale ramps to 6 via bpm ramp */ }
+    if (mode === 'M4') { settings.microJitter.enabled = true; }
+    updateControls();
+    saveSettings();
+    logEvent('mode_change', { mode, inhale: settings.inhale, hold: settings.hold, exhale: settings.exhale, bpm: settings.bpm });
+  }
+
+  function updateControls() {
+    // sliders
+    el('slBpm').value = String(settings.bpm);
+    lblBpm.textContent = `${fmt1(settings.bpm)}`;
+    el('slAmp').value = String(settings.amplitudePct * 100);
+    lblAmp.textContent = `${fmt1(settings.amplitudePct*100)} %`;
+    if (el('slHamAmp')) el('slHamAmp').value = String((settings.visual && settings.visual.hamsterScale) ? settings.visual.hamsterScale : 1.0);
+    if (typeof lblHamAmp !== 'undefined' && lblHamAmp) lblHamAmp.textContent = `×${fmt1((settings.visual && settings.visual.hamsterScale) ? settings.visual.hamsterScale : 1.0)}`;
+    el('slVol').value = String(settings.audio.masterDb);
+    lblVol.textContent = `${Math.round(settings.audio.masterDb)} dBFS`;
+    // toggles
+    el('tgRamp').classList.toggle('toggled', !!settings.ramp.enabled);
+    el('tgRamp').textContent = `ランプイン ${settings.ramp.enabled? 'ON':'OFF'}`;
+    el('tgJitter').classList.toggle('toggled', !!settings.microJitter.enabled);
+    el('tgJitter').textContent = `微小ゆらぎ ${settings.microJitter.enabled? 'ON':'OFF'}`;
+    el('tgAuto').classList.toggle('toggled', !!settings.scheduler.auto);
+    el('tgAuto').textContent = `自動セッション ${settings.scheduler.auto? 'ON':'OFF'}`;
+    el('tgTheme').classList.toggle('toggled', document.body.classList.contains('hi-contrast'));
+    el('tgTheme').textContent = `高コントラスト ${document.body.classList.contains('hi-contrast')? 'ON':'OFF'}`;
+    el('tgVisual').textContent = `表示: ${settings.visual.kind==='orb'?'オーブ':'バー'}`;
+    el('tgMotion').textContent = `動き: ${settings.visual.motion==='y'?'上下':'半径'}`;
+    // text badges
+    // Ensure toggle labels are readable in Japanese
+    try {
+      el('tgRamp').textContent = `ランプイン: ${settings.ramp.enabled? 'ON':'OFF'}`;
+      el('tgJitter').textContent = `微ゆらぎ: ${settings.microJitter.enabled? 'ON':'OFF'}`;
+      el('tgAuto').textContent = `自動セッション: ${settings.scheduler.auto? 'ON':'OFF'}`;
+      el('tgTheme').textContent = `ハイコントラスト: ${document.body.classList.contains('hi-contrast')? 'ON':'OFF'}`;
+      el('tgVisual').textContent = `表示: ${settings.visual.kind==='orb'?'ハムスター':'バー'}`;
+      el('tgMotion').textContent = `動き: ${settings.visual.motion==='y'?'上下':'ふくらみ'}`;
+    } catch {}
+    // reflect expand & character selection
+    if (el('btnExpandBody')) el('btnExpandBody').classList.toggle('toggled', (settings.visual && settings.visual.expand) !== 'cheeks');
+    if (el('btnExpandCheeks')) el('btnExpandCheeks').classList.toggle('toggled', (settings.visual && settings.visual.expand) === 'cheeks');
+    try {
+      const ch = (settings.visual && settings.visual.character) ? settings.visual.character : 'hamster';
+      if (el('btnCharHam')) el('btnCharHam').classList.toggle('toggled', ch==='hamster');
+      if (el('btnCharGuinea')) el('btnCharGuinea').classList.toggle('toggled', ch==='guinea');
+      if (el('btnCharDog')) el('btnCharDog').classList.toggle('toggled', ch==='dog');
+      if (el('btnCharCat')) el('btnCharCat').classList.toggle('toggled', ch==='cat');
+      if (el('btnCharOwl')) el('btnCharOwl').classList.toggle('toggled', ch==='owl');
+      if (el('btnCharPuffer')) el('btnCharPuffer').classList.toggle('toggled', ch==='puffer');
+    } catch {}
+    lblMode.textContent = settings.mode;
+    lblProfile.textContent = `吸${settings.inhale}/保${settings.hold}/吐${settings.exhale}`;
+    el('inInterval').value = String(settings.scheduler.intervalMin);
+    el('inDuration').value = String(settings.scheduler.sessionSec);
+  }
+
+  function updateStatus() {
+    sessionStateTag.textContent = scheduler.state;
+    const nowWall = Date.now()/1000;
+    if (scheduler.state === SCHED.PENDING) {
+      lblStatus.textContent = '次回セッション待機中';
+      lblNext.textContent = hhmmss(scheduler.nextStart - nowWall);
+      lblRemain.textContent = '--:--';
+    } else if (scheduler.state === SCHED.RUNNING) {
+      lblStatus.textContent = 'セッション実行中';
+      const t = audio.ctx ? audio.ctx.currentTime : 0;
+      lblRemain.textContent = hhmmss(scheduler.sessionEnd - t);
+      lblNext.textContent = '--:--';
+    } else if (scheduler.state === SCHED.COOLDOWN) {
+      lblStatus.textContent = 'クールダウン';
+      const t = audio.ctx ? audio.ctx.currentTime : 0;
+      lblRemain.textContent = hhmmss(scheduler.cooldownEnd - t);
+      lblNext.textContent = '--:--';
+    } else {
+      lblStatus.textContent = '待機';
+      lblRemain.textContent = '--:--';
+      lblNext.textContent = '--:--';
+    }
+  }
+
+  // --- Event listeners ---
+  el('btnStartStop').addEventListener('click', async () => {
+    await audio.ensureStarted();
+    if (scheduler.state === SCHED.RUNNING) {
+      scheduler.stopNow();
+      el('btnStartStop').textContent = '開始';
+    } else {
+      scheduler.startNow();
+      el('btnStartStop').textContent = '停止';
+    }
+  });
+  el('btnMute').addEventListener('click', async () => {
+    await audio.ensureStarted();
+    settings.audio.enabled = !settings.audio.enabled;
+    audio.setMute(!settings.audio.enabled);
+    el('btnMute').classList.toggle('toggled', !settings.audio.enabled);
+    el('btnMute').textContent = settings.audio.enabled? 'ミュート' : 'ミュート解除';
+    saveSettings();
+  });
+  el('btnFullscreen').addEventListener('click', () => {
+    document.body.classList.toggle('fullscreen');
+    updateControls();
+  });
+
+  // Modes
+  document.querySelectorAll('#modes .btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mode = btn.getAttribute('data-mode');
+      applyMode(mode);
+    });
+  });
+
+  // Sliders
+  el('slBpm').addEventListener('input', (e) => {
+    settings.bpm = parseFloat(e.target.value);
+    lblBpm.textContent = fmt1(settings.bpm);
+    saveSettings();
+  });
+  el('slAmp').addEventListener('input', (e) => {
+    settings.amplitudePct = parseFloat(e.target.value) / 100;
+    lblAmp.textContent = `${fmt1(settings.amplitudePct*100)} %`;
+    saveSettings();
+  });
+  if (el('slHamAmp')) {
+    el('slHamAmp').addEventListener('input', (e) => {
+      const v = parseFloat(e.target.value);
+      if (!settings.visual) settings.visual = {};
+      settings.visual.hamsterScale = v;
+      if (typeof lblHamAmp !== 'undefined' && lblHamAmp) lblHamAmp.textContent = `×${fmt1(v)}`;
+      saveSettings();
+    });
+  }
+  el('slVol').addEventListener('input', async (e) => {
+    const db = parseFloat(e.target.value);
+    settings.audio.masterDb = db;
+    lblVol.textContent = `${Math.round(db)} dBFS`;
+    await audio.ensureStarted();
+    audio.setMasterDb(db);
+    saveSettings();
+  });
+
+  // Toggles
+  el('tgRamp').addEventListener('click', () => { settings.ramp.enabled = !settings.ramp.enabled; updateControls(); saveSettings(); });
+  el('tgJitter').addEventListener('click', () => { settings.microJitter.enabled = !settings.microJitter.enabled; updateControls(); saveSettings(); });
+  el('tgAuto').addEventListener('click', () => { settings.scheduler.auto = !settings.scheduler.auto; if (settings.scheduler.auto && scheduler.state===SCHED.IDLE) scheduler.planNext(); updateControls(); saveSettings(); });
+  el('tgTheme').addEventListener('click', () => { 
+    document.body.classList.toggle('hi-contrast'); 
+    settings.theme = document.body.classList.contains('hi-contrast') ? 'high' : 'dark';
+    updateControls(); saveSettings(); 
+  });
+  el('tgVisual').addEventListener('click', () => { settings.visual.kind = settings.visual.kind==='orb'?'bar':'orb'; updateControls(); saveSettings(); el('tgVisual').textContent = `表示: ${settings.visual.kind==='orb'?'ハムスター':'バー'}`; });
+  el('tgMotion').addEventListener('click', () => { settings.visual.motion = settings.visual.motion==='y'?'radius':'y'; updateControls(); saveSettings(); });
+  // Expand mode buttons
+  if (el('btnExpandBody')) el('btnExpandBody').addEventListener('click', () => { if (!settings.visual) settings.visual = {}; settings.visual.expand = 'body'; updateControls(); saveSettings(); });
+  if (el('btnExpandCheeks')) el('btnExpandCheeks').addEventListener('click', () => { if (!settings.visual) settings.visual = {}; settings.visual.expand = 'cheeks'; updateControls(); saveSettings(); });
+  // Character buttons
+  const setChar = (c) => { if (!settings.visual) settings.visual = {}; settings.visual.character = c; updateControls(); saveSettings(); };
+  if (el('btnCharHam')) el('btnCharHam').addEventListener('click', () => setChar('hamster'));
+  if (el('btnCharGuinea')) el('btnCharGuinea').addEventListener('click', () => setChar('guinea'));
+  if (el('btnCharDog')) el('btnCharDog').addEventListener('click', () => setChar('dog'));
+  if (el('btnCharCat')) el('btnCharCat').addEventListener('click', () => setChar('cat'));
+  if (el('btnCharOwl')) el('btnCharOwl').addEventListener('click', () => setChar('owl'));
+  if (el('btnCharPuffer')) el('btnCharPuffer').addEventListener('click', () => setChar('puffer'));
+
+  // Scheduler inputs
+  el('inInterval').addEventListener('change', (e) => { settings.scheduler.intervalMin = clamp(parseInt(e.target.value||'30'), 25, 40); saveSettings(); });
+  el('inDuration').addEventListener('change', (e) => { settings.scheduler.sessionSec = clamp(parseInt(e.target.value||'90'), 60, 120); saveSettings(); });
+  el('btnSkip').addEventListener('click', () => { if (scheduler.state===SCHED.PENDING) scheduler.planNext(Date.now()/1000); logEvent('skip'); updateStatus(); });
+
+  // Logging / settings
+  el('btnExportCsv').addEventListener('click', exportCsv);
+  el('btnReset').addEventListener('click', () => {
+    if (!confirm('設定を初期化しますか？')) return;
+    settings = { ...DEFAULT_SETTINGS };
+    saveSettings();
+    updateControls();
+  });
+
+  // Keyboard
+  window.addEventListener('keydown', async (e) => {
+    if (e.repeat) return;
+    if (e.code === 'Space') { e.preventDefault(); el('btnStartStop').click(); }
+    if (e.key === 'm' || e.key === 'M') { el('btnMute').click(); }
+    if (e.key === 'f' || e.key === 'F') { el('btnFullscreen').click(); }
+    if (e.key === 'ArrowUp') { settings.bpm = clamp(settings.bpm + 0.1, 5, 9); updateControls(); saveSettings(); }
+    if (e.key === 'ArrowDown') { settings.bpm = clamp(settings.bpm - 0.1, 5, 9); updateControls(); saveSettings(); }
+    if (e.key >= '1' && e.key <= '5') {
+      const idx = parseInt(e.key);
+      const map = ['M0','M1','M2','M3','M4'];
+      applyMode(map[idx-1]);
+    }
+  });
+
+  // --- Main Loop ---
+  let rafId = 0;
+  async function loop() {
+    rafId = requestAnimationFrame(loop);
+    // Always draw; if audio is not started, use wall clock for visuals
+    scheduler.tick();
+
+    // Compute envelope time source
+    const t = audio.ctx ? audio.ctx.currentTime : nowSec();
+    const { env, bpm, ampFactor } = lfo.eval(t);
+    // Apply to audio if available
+    if (audio.ctx) audio.applyEnvelope(clamp(env * ampFactor, 0, 1));
+    // Draw motion
+    // temporarily embed ampFactor in settings for motion draw without global state pollution
+    const tmpAmp = settings.amplitudePct;
+    settings.amplitudePct = settings.amplitudePct * ampFactor; // ±depth around base
+    motion.draw(env);
+    settings.amplitudePct = tmpAmp;
+    lblEff.textContent = `${fmt1(lfo.effectiveBpm)} BPM`;
+    updateStatus();
+  }
+
+  // Init
+  function init() {
+    document.body.classList.toggle('hi-contrast', settings.theme === 'high');
+    updateControls();
+    // Ensure visual toggle label uses human-friendly names
+    try { el('tgVisual').textContent = `表示: ${settings.visual.kind==='orb'?'ハムスター':'バー'}`; } catch {}
+    updateStatus();
+    // start idle loop; AudioContext will be created on first gesture
+    loop();
+    // auto planning
+    if (settings.scheduler.auto) scheduler.planNext();
+    logEvent('app_init', { mode: settings.mode, bpm: settings.bpm });
+  }
+
+  // Resize canvas on load
+  window.addEventListener('load', () => {
+    // Map persisted sliders
+    el('slAmp').value = String(settings.amplitudePct * 100);
+    el('slBpm').value = String(settings.bpm);
+    el('slVol').value = String(settings.audio.masterDb);
+    if (el('slHamAmp')) el('slHamAmp').value = String((settings.visual && settings.visual.hamsterScale) ? settings.visual.hamsterScale : 1.0);
+    init();
+  });
+
+  </script>
+</body>
+</html>
