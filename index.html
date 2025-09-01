@@ -53,6 +53,7 @@
     .canvas-wrap {
       position: relative;
       background: radial-gradient(1200px 1200px at 50% 45%, #eef2ff 0%, #f8fafc 60%, #ffffff 100%);
+      overflow: hidden;
     }
     canvas {
       display: block;
@@ -110,6 +111,11 @@
     .fullscreen header, .fullscreen footer { background: transparent; border: 0; }
     .hi-contrast { --bg: var(--hi-contrast-bg); --fg: var(--hi-contrast-fg); --panel: #000; --panel-border:#333; }
     .badge { padding: 2px 6px; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 999px; font-size: 12px; color: var(--fg); }
+    #modes { display: none !important; }
+    .row.buttons, #btnStartStop, #btnMute { display: none !important; }
+    .group:has(#tgRamp), .group:has(#inInterval), .group:has(#btnExportCsv) { display: none !important; }
+    #sessionState { display: none !important; }
+    .fs-btn { position: absolute; right: 8px; bottom: 8px; padding: 6px 8px; font-size: 12px; border-radius: 8px; border: 1px solid var(--panel-border); background: rgba(255,255,255,0.75); cursor: pointer; backdrop-filter: blur(4px); }
   </style>
 </head>
 <body>
@@ -120,8 +126,17 @@
     <div class="main">
       <div class="canvas-wrap">
         <canvas id="canvas"></canvas>
+        <button id="btnFullscreen" class="fs-btn" title="全画面切替">⛶</button>
       </div>
       <div class="controls">
+        <div class="group" id="pace">
+          <h3>呼吸ペース</h3>
+          <div class="row" id="paceRow">
+            <button class="btn ghost" data-mode="M0">日常</button>
+            <button class="btn ghost" data-mode="M2">深呼吸</button>
+            <button class="btn ghost" data-mode="M4">ゆらぎあり</button>
+          </div>
+        </div>
         <div class="row buttons">
           <button id="btnStartStop" class="btn primary">開始</button>
           <button id="btnMute" class="btn ghost">ミュート</button>
@@ -145,7 +160,7 @@
         </div>
         <div class="group">
           <h3>キャラクター</h3>
-          <div class="row">
+          <div class="row" id="charRow">
             <button id="btnCharHam" class="btn ghost" data-char="hamster">ハムスター</button>
             <button id="btnCharGuinea" class="btn ghost" data-char="guinea">モルモット</button>
             <button id="btnCharDog" class="btn ghost" data-char="dog">犬</button>
@@ -155,8 +170,9 @@
         <div class="group">
           <h3>膨らみモード</h3>
           <div class="row">
-            <button id="btnExpandBody" class="btn ghost" data-expand="body">膨らみ: 全身</button>
-            <button id="btnExpandCheeks" class="btn ghost" data-expand="cheeks">膨らみ: ほっぺ</button>
+            <button id="btnExpandBody" class="btn ghost" data-expand="body">全身</button>
+            <button id="btnExpandCheeks" class="btn ghost" data-expand="cheeks">ほっぺ</button>
+            <button id="btnMotionY" class="btn ghost">上下</button>
           </div>
         </div>
         <div class="group">
@@ -491,6 +507,13 @@
       this.ctx = canvas.getContext('2d');
       this.resize();
       window.addEventListener('resize', () => this.resize());
+      // ResizeObserver keeps canvas in sync with container changes (e.g., sidebar collapse)
+      try {
+        if (window.ResizeObserver && this.canvas.parentElement) {
+          this._ro = new ResizeObserver(() => this.resize());
+          this._ro.observe(this.canvas.parentElement);
+        }
+      } catch {}
       this._blink = null; // {next, until, on}
     }
     resize() {
@@ -518,7 +541,7 @@
 
       if (visualKind === 'orb') {
         // Cute front-facing critters that breathe and blink
-        const y = motion === 'y' ? centerY - yOffset : centerY;
+        let y = motion === 'y' ? centerY - yOffset : centerY;
         const baseSize = Math.min(W, H) * 0.22; // overall scale
         const hs = (settings.visual && settings.visual.hamsterScale) ? settings.visual.hamsterScale : 1.0;
         const eCentered = (env - 0.5) * 2; // -1..+1
@@ -527,6 +550,10 @@
         const bodyAmp = expandMode === 'body' ? baseAmp * 0.5 : baseAmp * 0.08; // smaller when cheeks-only
         const breatheScale = 1 + eCentered * bodyAmp;
         const u = baseSize * breatheScale; // pixel per unit (affects body)
+        // keep within viewport vertically (rough estimate based on body radius)
+        const estRy = u * 1.1;
+        const margin = Math.max(8, u * 0.1);
+        y = clamp(y, estRy + margin, H - margin - u * 0.15);
 
         // Blink scheduler
         const tn = nowSec();
@@ -848,6 +875,48 @@
     logEvent('mode_change', { mode, inhale: settings.inhale, hold: settings.hold, exhale: settings.exhale, bpm: settings.bpm });
   }
 
+  // Simplified controls updater (override)
+  function updateControls() {
+    // sliders
+    try { if (el('slBpm')) { el('slBpm').value = String(settings.bpm); lblBpm.textContent = `${fmt1(settings.bpm)}`; } } catch {}
+    try { if (el('slAmp')) { el('slAmp').value = String(settings.amplitudePct * 100); lblAmp.textContent = `${fmt1(settings.amplitudePct*100)} %`; } } catch {}
+    try { if (el('slHamAmp')) { el('slHamAmp').value = String((settings.visual && settings.visual.hamsterScale) ? settings.visual.hamsterScale : 1.0); if (typeof lblHamAmp !== 'undefined' && lblHamAmp) lblHamAmp.textContent = `${fmt1((settings.visual && settings.visual.hamsterScale) ? settings.visual.hamsterScale : 1.0)}`; } } catch {}
+    try { if (el('slVol')) { el('slVol').value = String(settings.audio.masterDb); lblVol.textContent = `${Math.round(settings.audio.masterDb)} dBFS`; } } catch {}
+
+    // pace buttons
+    try {
+      document.querySelectorAll('#paceRow .btn').forEach(b => {
+        const m = b.getAttribute('data-mode');
+        b.classList.toggle('toggled', m === settings.mode);
+      });
+    } catch {}
+
+    // expand & motion
+    try {
+      const motion = settings.visual.motion || 'y';
+      const expand = (settings.visual && settings.visual.expand) || 'body';
+      if (el('btnExpandBody')) el('btnExpandBody').classList.toggle('toggled', motion==='radius' && expand==='body');
+      if (el('btnExpandCheeks')) el('btnExpandCheeks').classList.toggle('toggled', motion==='radius' && expand==='cheeks');
+      if (el('btnMotionY')) el('btnMotionY').classList.toggle('toggled', motion==='y');
+    } catch {}
+
+    // character selection
+    try {
+      const ch = (settings.visual && settings.visual.character) ? settings.visual.character : 'hamster';
+      ['Ham','Guinea','Dog','Cat','Owl','Puffer'].forEach(suf => {
+        const id = 'btnChar' + suf;
+        const key = id.replace('btnChar','').toLowerCase();
+        const map = { ham:'hamster', guinea:'guinea', dog:'dog', cat:'cat', owl:'owl', puffer:'puffer' };
+        const elBtn = el(id);
+        if (elBtn) elBtn.classList.toggle('toggled', ch===map[key]);
+      });
+    } catch {}
+
+    // footer badges
+    try { if (lblMode) lblMode.textContent = settings.mode; } catch {}
+    try { if (lblProfile) lblProfile.textContent = `吸${settings.inhale}/保${settings.hold}/吐${settings.exhale}`; } catch {}
+  }
+
   function updateControls() {
     // sliders
     el('slBpm').value = String(settings.bpm);
@@ -946,7 +1015,7 @@
   });
 
   // Modes
-  document.querySelectorAll('#modes .btn').forEach(btn => {
+  document.querySelectorAll('#paceRow .btn, #modes .btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const mode = btn.getAttribute('data-mode');
       applyMode(mode);
@@ -983,6 +1052,7 @@
   });
 
   // Toggles
+  try {
   el('tgRamp').addEventListener('click', () => { settings.ramp.enabled = !settings.ramp.enabled; updateControls(); saveSettings(); });
   el('tgJitter').addEventListener('click', () => { settings.microJitter.enabled = !settings.microJitter.enabled; updateControls(); saveSettings(); });
   el('tgAuto').addEventListener('click', () => { settings.scheduler.auto = !settings.scheduler.auto; if (settings.scheduler.auto && scheduler.state===SCHED.IDLE) scheduler.planNext(); updateControls(); saveSettings(); });
@@ -993,9 +1063,11 @@
   });
   el('tgVisual').addEventListener('click', () => { settings.visual.kind = settings.visual.kind==='orb'?'bar':'orb'; updateControls(); saveSettings(); el('tgVisual').textContent = `表示: ${settings.visual.kind==='orb'?'ハムスター':'バー'}`; });
   el('tgMotion').addEventListener('click', () => { settings.visual.motion = settings.visual.motion==='y'?'radius':'y'; updateControls(); saveSettings(); });
+  } catch {}
   // Expand mode buttons
-  if (el('btnExpandBody')) el('btnExpandBody').addEventListener('click', () => { if (!settings.visual) settings.visual = {}; settings.visual.expand = 'body'; updateControls(); saveSettings(); });
-  if (el('btnExpandCheeks')) el('btnExpandCheeks').addEventListener('click', () => { if (!settings.visual) settings.visual = {}; settings.visual.expand = 'cheeks'; updateControls(); saveSettings(); });
+  if (el('btnExpandBody')) el('btnExpandBody').addEventListener('click', () => { if (!settings.visual) settings.visual = {}; settings.visual.expand = 'body'; settings.visual.motion='radius'; updateControls(); saveSettings(); });
+  if (el('btnExpandCheeks')) el('btnExpandCheeks').addEventListener('click', () => { if (!settings.visual) settings.visual = {}; settings.visual.expand = 'cheeks'; settings.visual.motion='radius'; updateControls(); saveSettings(); });
+  if (el('btnMotionY')) el('btnMotionY').addEventListener('click', () => { if (!settings.visual) settings.visual = {}; settings.visual.motion = 'y'; updateControls(); saveSettings(); });
   // Character buttons
   const setChar = (c) => { if (!settings.visual) settings.visual = {}; settings.visual.character = c; updateControls(); saveSettings(); };
   if (el('btnCharHam')) el('btnCharHam').addEventListener('click', () => setChar('hamster'));
@@ -1006,13 +1078,13 @@
   if (el('btnCharPuffer')) el('btnCharPuffer').addEventListener('click', () => setChar('puffer'));
 
   // Scheduler inputs
-  el('inInterval').addEventListener('change', (e) => { settings.scheduler.intervalMin = clamp(parseInt(e.target.value||'30'), 25, 40); saveSettings(); });
-  el('inDuration').addEventListener('change', (e) => { settings.scheduler.sessionSec = clamp(parseInt(e.target.value||'90'), 60, 120); saveSettings(); });
-  el('btnSkip').addEventListener('click', () => { if (scheduler.state===SCHED.PENDING) scheduler.planNext(Date.now()/1000); logEvent('skip'); updateStatus(); });
+  if (el('inInterval')) el('inInterval').addEventListener('change', (e) => { settings.scheduler.intervalMin = clamp(parseInt(e.target.value||'30'), 25, 40); saveSettings(); });
+  if (el('inDuration')) el('inDuration').addEventListener('change', (e) => { settings.scheduler.sessionSec = clamp(parseInt(e.target.value||'90'), 60, 120); saveSettings(); });
+  if (el('btnSkip')) el('btnSkip').addEventListener('click', () => { try { if (scheduler.state===SCHED.PENDING) scheduler.planNext(Date.now()/1000); } catch {} logEvent('skip'); updateStatus(); });
 
   // Logging / settings
-  el('btnExportCsv').addEventListener('click', exportCsv);
-  el('btnReset').addEventListener('click', () => {
+  if (el('btnExportCsv')) el('btnExportCsv').addEventListener('click', exportCsv);
+  if (el('btnReset')) el('btnReset').addEventListener('click', () => {
     if (!confirm('設定を初期化しますか？')) return;
     settings = { ...DEFAULT_SETTINGS };
     saveSettings();
@@ -1022,24 +1094,27 @@
   // Keyboard
   window.addEventListener('keydown', async (e) => {
     if (e.repeat) return;
-    if (e.code === 'Space') { e.preventDefault(); el('btnStartStop').click(); }
-    if (e.key === 'm' || e.key === 'M') { el('btnMute').click(); }
+    // Space/mute disabled; app runs continuously
     if (e.key === 'f' || e.key === 'F') { el('btnFullscreen').click(); }
     if (e.key === 'ArrowUp') { settings.bpm = clamp(settings.bpm + 0.1, 5, 9); updateControls(); saveSettings(); }
     if (e.key === 'ArrowDown') { settings.bpm = clamp(settings.bpm - 0.1, 5, 9); updateControls(); saveSettings(); }
-    if (e.key >= '1' && e.key <= '5') {
-      const idx = parseInt(e.key);
-      const map = ['M0','M1','M2','M3','M4'];
-      applyMode(map[idx-1]);
-    }
+    if (e.key === '1') applyMode('M0'); // 日常
+    if (e.key === '2') applyMode('M2'); // 深呼吸
+    if (e.key === '3') applyMode('M4'); // ゆらぎあり
   });
+
+  // override status updater to simple always-on state
+  function updateStatus() {
+    try { if (lblStatus) lblStatus.textContent = '動作中'; } catch {}
+    try { if (typeof lblNext !== 'undefined' && lblNext) lblNext.textContent = '--:--'; } catch {}
+    try { if (typeof lblRemain !== 'undefined' && lblRemain) lblRemain.textContent = '--:--'; } catch {}
+  }
 
   // --- Main Loop ---
   let rafId = 0;
   async function loop() {
     rafId = requestAnimationFrame(loop);
-    // Always draw; if audio is not started, use wall clock for visuals
-    scheduler.tick();
+    // Always draw; visuals update regardless of audio state
 
     // Compute envelope time source
     const t = audio.ctx ? audio.ctx.currentTime : nowSec();
@@ -1059,14 +1134,23 @@
   // Init
   function init() {
     document.body.classList.toggle('hi-contrast', settings.theme === 'high');
+    // merge owl/puffer buttons into character row to keep one line
+    try {
+      const row = el('charRow');
+      const owl = el('btnCharOwl');
+      const puf = el('btnCharPuffer');
+      if (row && owl) row.appendChild(owl);
+      if (row && puf) row.appendChild(puf);
+    } catch {}
     updateControls();
     // Ensure visual toggle label uses human-friendly names
     try { el('tgVisual').textContent = `表示: ${settings.visual.kind==='orb'?'ハムスター':'バー'}`; } catch {}
     updateStatus();
     // start idle loop; AudioContext will be created on first gesture
     loop();
-    // auto planning
-    if (settings.scheduler.auto) scheduler.planNext();
+    // kick audio on first user interaction; keep always running
+    const kick = async () => { try { await audio.ensureStarted(); audio.startSession(); } catch {} };
+    window.addEventListener('pointerdown', kick, { once: true });
     logEvent('app_init', { mode: settings.mode, bpm: settings.bpm });
   }
 
